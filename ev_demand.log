@@ -1951,3 +1951,21 @@ httpx.RemoteProtocolError: Server disconnected without sending a response.
 2026-04-04T23:45:25 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
 2026-04-04T23:50:30 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
 2026-04-04T23:50:31 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-04T23:55:37 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-04T23:55:38 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:00:41 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:00:42 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:05:46 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:05:47 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:10:50 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:10:50 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:15:53 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:15:53 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:20:57 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:20:57 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:26:00 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:26:01 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:31:05 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:31:05 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
+2026-04-05T00:36:08 | INFO     | httpx | HTTP Request: GET https://api.tupinambaenergia.com.br/stationsShortVersion?plugTypes=%5B%22Tipo+2%22%2C+%22CCS+2%22%2C+%22CHAdeMO%22%5D&fast=false&searchText= "HTTP/1.1 200 OK"
+2026-04-05T00:36:08 | INFO     | ingest.tupi | Tupi poll: inserted 2035 snapshots
