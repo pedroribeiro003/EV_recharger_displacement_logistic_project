@@ -32,12 +32,30 @@ class StatusSnapshot(Base):
 
     @classmethod
     def from_tupi(cls, station_id: int, raw_connector: dict) -> "StatusSnapshot":
-        """Build a snapshot from a raw Tupi API connector payload."""
-        status = raw_connector.get("status") or raw_connector.get("state") or "UNKNOWN"
+        """Build a snapshot from a raw Tupi connectedPlugs entry."""
+        status = (
+            raw_connector.get("stateName")
+            or raw_connector.get("status")
+            or raw_connector.get("state")
+            or "UNKNOWN"
+        )
+        connector_code = str(
+            raw_connector.get("_id")
+            or raw_connector.get("id")
+            or raw_connector.get("connectorId")
+            or raw_connector.get("connectorID")
+            or ""
+        )
+
+        # Session info — at connector level or nested in currentSession
         session = raw_connector.get("currentSession") or {}
         energy = session.get("energyDelivered") or session.get("energy_kwh")
         duration = session.get("duration") or session.get("session_minutes")
-        started_raw = session.get("startTime") or session.get("started_at")
+        started_raw = (
+            raw_connector.get("startChargingOn")
+            or session.get("startTime")
+            or session.get("started_at")
+        )
 
         started_at: Optional[datetime] = None
         if started_raw:
@@ -48,7 +66,7 @@ class StatusSnapshot(Base):
 
         return cls(
             station_id=station_id,
-            connector_code=str(raw_connector.get("connectorId") or raw_connector.get("id", "")),
+            connector_code=connector_code,
             status=str(status).upper(),
             session_started_at=started_at,
             energy_kwh=float(energy) if energy is not None else None,

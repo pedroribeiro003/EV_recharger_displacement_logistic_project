@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:openchargemap.org)",
+      "WebFetch(domain:dadosabertos.aneel.gov.br)",
+      "WebFetch(domain:community.openchargemap.org)",
+      "WebFetch(domain:globalevdata.github.io)",
+      "WebFetch(domain:api.openchargemap.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.electricitymaps.com)",
+      "WebFetch(domain:app.electricitymaps.com)",
+      "WebFetch(domain:www.gov.br)",
+      "WebFetch(domain:www.epe.gov.br)",
+      "WebFetch(domain:dados.ons.org.br)",
+      "WebFetch(domain:static.electricitymaps.com)",
+      "WebFetch(domain:tech.marksblogg.com)",
+      "WebFetch(domain:developers.enode.com)",
+      "WebFetch(domain:chargemap.com)"
+    ]
+  }
+}

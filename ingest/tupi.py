@@ -36,8 +36,9 @@ class TupiIngester:
     # ------------------------------------------------------------------
 
     def fetch_all_stations(self) -> list[dict]:
-        payload = {"plugTypes": _PLUG_TYPES, "fast": False}
-        resp = self.client.post("/stationsShortVersion", json=payload)
+        import json as _json
+        params = {"plugTypes": _json.dumps(_PLUG_TYPES), "fast": "false", "searchText": ""}
+        resp = self.client.get("/stationsShortVersion", params=params)
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, list):
@@ -60,35 +61,45 @@ class TupiIngester:
     def _parse_station(self, raw: dict, detail: dict | None = None) -> dict:
         merged = {**raw, **(detail or {})}
         location = merged.get("location") or {}
-        address = merged.get("address") or {}
+        address_raw = merged.get("address") or {}
+        address_str = address_raw if isinstance(address_raw, str) else (
+            address_raw.get("street") or merged.get("fullAddress") or ""
+        )
         return {
-            "station_code": str(merged.get("id") or merged.get("stationId") or merged.get("_id")),
+            "station_code": str(
+                merged.get("_id") or merged.get("id") or merged.get("stationId") or ""
+            ),
             "name": merged.get("name") or merged.get("title"),
             "operator": merged.get("operator") or merged.get("network"),
-            "address": (
-                address.get("street")
-                or merged.get("address")
-                or merged.get("fullAddress")
-            ),
-            "city": address.get("city") or merged.get("city"),
-            "state_uf": address.get("state") or merged.get("state"),
+            "address": address_str or None,
+            "city": merged.get("city"),
+            "state_uf": merged.get("state") or merged.get("state_uf"),
             "lat": float(location.get("lat") or merged.get("lat") or 0) or None,
             "lng": float(location.get("lng") or merged.get("lng") or 0) or None,
-            "is_public": bool(merged.get("isPublic", True)),
+            "is_public": not bool(merged.get("private", False)),
             "raw_json": json.dumps(raw, ensure_ascii=False),
         }
 
     def _parse_connectors(self, raw: dict) -> list[dict]:
-        connectors = raw.get("connectors") or raw.get("plugs") or []
+        connectors = (
+            raw.get("connectedPlugs")
+            or raw.get("connectors")
+            or raw.get("plugs")
+            or []
+        )
         result = []
         for c in connectors:
             result.append(
                 {
-                    "connector_code": str(c.get("id") or c.get("connectorId") or ""),
-                    "plug_type": c.get("type") or c.get("plugType"),
-                    "power_kw": c.get("powerKw") or c.get("maxPower"),
-                    "is_fast": bool(c.get("isFast") or c.get("fast", False)),
-                    "current_status": str(c.get("status") or c.get("state") or "UNKNOWN").upper(),
+                    "connector_code": str(
+                        c.get("_id") or c.get("id") or c.get("connectorId") or ""
+                    ),
+                    "plug_type": c.get("type") or c.get("plugType") or c.get("current"),
+                    "power_kw": c.get("power") or c.get("powerKw") or c.get("maxPower"),
+                    "is_fast": c.get("current", "").upper() == "DC",
+                    "current_status": str(
+                        c.get("stateName") or c.get("status") or c.get("state") or "UNKNOWN"
+                    ).upper(),
                 }
             )
         return result
@@ -104,7 +115,7 @@ class TupiIngester:
         logger.info("Tupi enrich: %d stations found", len(stations))
 
         for idx, raw in enumerate(stations, 1):
-            sid = str(raw.get("id") or raw.get("stationId") or raw.get("_id") or "")
+            sid = str(raw.get("_id") or raw.get("id") or raw.get("stationId") or "")
             if not sid:
                 continue
 
@@ -113,7 +124,7 @@ class TupiIngester:
             station = self.station_repo.upsert(station_data)
 
             # Upsert connectors
-            if detail or raw.get("connectors"):
+            if detail or raw.get("connectedPlugs") or raw.get("connectors"):
                 source = detail or raw
                 for conn_data in self._parse_connectors(source):
                     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -141,22 +152,36 @@ class TupiIngester:
 
     def run_poll(self) -> None:
         """Infinite poll loop: snapshot connector statuses."""
+        from sqlalchemy import select
+        from db.models.station import Station
+
         logger.info("Tupi poll: starting (interval=%ds)", settings.poll_interval)
         while True:
             try:
-                stations = self.fetch_all_stations()
+                stations_api = self.fetch_all_stations()
+
+                # Preload all known station codes in one query to avoid N+1
+                all_db_stations: dict[str, int] = {
+                    s.station_code: s.id
+                    for s in self.session.scalars(select(Station)).all()
+                }
+
                 snapshots: list[StatusSnapshot] = []
-                for raw in stations:
-                    station_code = str(
-                        raw.get("id") or raw.get("stationId") or raw.get("_id") or ""
-                    )
+                for raw in stations_api:
+                    station_code = str(raw.get("_id") or raw.get("id") or raw.get("stationId") or "")
                     if not station_code:
                         continue
-                    station = self.station_repo.get_by_station_code(station_code)
-                    if station is None:
+                    station_id = all_db_stations.get(station_code)
+                    if station_id is None:
                         continue
-                    for connector in raw.get("connectors") or raw.get("plugs") or []:
-                        snapshots.append(StatusSnapshot.from_tupi(station.id, connector))
+                    connectors = (
+                        raw.get("connectedPlugs")
+                        or raw.get("connectors")
+                        or raw.get("plugs")
+                        or []
+                    )
+                    for connector in connectors:
+                        snapshots.append(StatusSnapshot.from_tupi(station_id, connector))
 
                 inserted = self.snapshot_repo.bulk_insert(snapshots)
                 self.session.commit()

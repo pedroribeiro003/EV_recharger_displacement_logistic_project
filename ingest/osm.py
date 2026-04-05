@@ -158,14 +158,31 @@ class OsmIngester:
         logger.info("OSM: distance calculation complete")
 
     def run(self) -> None:
-        for category, query in QUERIES.items():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Fetch all categories concurrently (pure HTTP, no shared state)
+        results: dict[str, list[dict]] = {}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futs = {
+                pool.submit(self.fetch_pois, cat, query): cat
+                for cat, query in QUERIES.items()
+            }
+            for fut in as_completed(futs):
+                cat = futs[fut]
+                try:
+                    results[cat] = fut.result()
+                except Exception as exc:
+                    logger.exception("OSM: error fetching %s: %s", cat, exc)
+                    results[cat] = []
+
+        # Upsert sequentially — session is not thread-safe
+        for category, pois in results.items():
             try:
-                pois = self.fetch_pois(category, query)
                 self._upsert_pois(pois)
                 self._update_geom(category)
                 self.session.commit()
             except Exception as exc:
-                logger.exception("OSM: error processing %s: %s", category, exc)
+                logger.exception("OSM: error upserting %s: %s", category, exc)
                 self.session.rollback()
 
         self._calculate_distances()

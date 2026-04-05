@@ -66,13 +66,60 @@ def cmd_ingest_osm(args: argparse.Namespace) -> None:
 
 
 def cmd_ingest_all(args: argparse.Namespace) -> None:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ingest.ibge import IbgeIngester
+    from ingest.tupi import TupiIngester
+    from ingest.anp import AnpIngester
+    from ingest.ipea import IpeaIngester
+    from ingest.osm import OsmIngester
+
+    def _ibge():
+        with SessionLocal() as s:
+            IbgeIngester(s).run()
+
+    def _tupi():
+        with SessionLocal() as s:
+            TupiIngester(s).run_enrich(delay=0.3)
+
+    def _anp():
+        with SessionLocal() as s:
+            AnpIngester(s).run()
+
+    def _ipea():
+        with SessionLocal() as s:
+            IpeaIngester(s).run()
+
+    def _osm():
+        with SessionLocal() as s:
+            OsmIngester(s).run()
+
+    def _run(name: str, fn):
+        try:
+            fn()
+        except Exception as exc:
+            logger.exception("%s failed: %s", name, exc)
+
     logger.info("Running full ingestion pipeline")
-    cmd_ingest_ibge(args)
-    cmd_ingest_tupi(argparse.Namespace(poll=False, delay=0.3))
-    cmd_ingest_anp(args)
-    cmd_ingest_ipea(args)
-    cmd_ingest_osm(args)
+
+    # Phase 1 — independent sources in parallel
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futs = {pool.submit(_run, name, fn): name for name, fn in [
+            ("ibge", _ibge), ("tupi", _tupi), ("anp", _anp),
+        ]}
+        for fut in as_completed(futs):
+            fut.result()
+
+    # Phase 2 — IPEA (needs IBGE done) + OSM (needs Tupi done for distances)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futs = {pool.submit(_run, name, fn): name for name, fn in [
+            ("ipea", _ipea), ("osm", _osm),
+        ]}
+        for fut in as_completed(futs):
+            fut.result()
+
+    # Phase 3 — geocode depends on stations + OSM distances
     cmd_geocode(args)
+
     logger.info("Full ingestion pipeline complete")
 
 

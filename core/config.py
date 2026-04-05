@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/ev_demand"
 
     # Tupi
-    tupi_base_url: str = "https://api.tupimob.com"
+    tupi_base_url: str = "https://api.tupinambaenergia.com.br"
     tupi_origin: str = "https://tupimob.com"
     poll_interval: int = 60
 

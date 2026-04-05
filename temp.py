@@ -1,311 +1,232 @@
-"""
-Tupi API Explorer
-=================
-Testa e documenta todos os endpoints descobertos da API da Tupinamb Energy.
-Roda com: python tupi_api_explorer.py
-Dependências: pip install httpx rich
-"""
-
+import io, json, sys, time
+from datetime import datetime, timedelta, timezone
 import httpx
-import json
-from datetime import datetime
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 BASE_URL = "https://api.tupinambaenergia.com.br"
-
+ORIGIN   = "https://tupimob.com"
+PLUG_TYPES = ["Tipo 2", "CCS 2", "CHAdeMO"]
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36",
-    "Accept": "application/json, */*",
-    "Origin": "https://tupimob.com",
-    "Referer": "https://tupimob.com/",
+    "Origin": ORIGIN,
+    "Referer": ORIGIN + "/",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
-
-# ─── Endpoints a testar ────────────────────────────────────────────────────────
-
-STATION_ENDPOINTS = [
-    {
-        "label": "Todas as estações (Tipo 2 + CCS 2 + CHAdeMO, AC+DC)",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": '["Tipo 2","CCS 2","CHAdeMO"]',
-            "fast": "false",
-            "searchText": "",
-        },
-    },
-    {
-        "label": "Somente carregadores rápidos DC",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": '["CCS 2","CHAdeMO"]',
-            "fast": "true",
-            "searchText": "",
-        },
-    },
-    {
-        "label": "Somente AC (Tipo 2)",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": '["Tipo 2"]',
-            "fast": "false",
-            "searchText": "",
-        },
-    },
-    {
-        "label": "Sem filtro de plug",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": "[]",
-            "fast": "false",
-            "searchText": "",
-        },
-    },
-    {
-        "label": "Busca por texto: São Paulo",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": '["Tipo 2","CCS 2","CHAdeMO"]',
-            "fast": "false",
-            "searchText": "São Paulo",
-        },
-    },
-    {
-        "label": "Busca por texto: Shell",
-        "url": f"{BASE_URL}/stationsShortVersion",
-        "params": {
-            "plugTypes": '["Tipo 2","CCS 2","CHAdeMO"]',
-            "fast": "false",
-            "searchText": "Shell",
-        },
-    },
-]
-
-# Endpoints alternativos (path discovery)
-OTHER_ENDPOINTS = [
-    {"label": "GET /stations",          "url": f"{BASE_URL}/stations"},
-    {"label": "GET /chargers",          "url": f"{BASE_URL}/chargers"},
-    {"label": "GET /sessions",          "url": f"{BASE_URL}/sessions"},
-    {"label": "GET /availability",      "url": f"{BASE_URL}/availability"},
-    {"label": "GET /companies",         "url": f"{BASE_URL}/companies"},
-    {"label": "GET /plugTypes",         "url": f"{BASE_URL}/plugTypes"},
-    {"label": "GET /stationTypes",      "url": f"{BASE_URL}/stationTypes"},
-    {"label": "GET /v1/stations",       "url": f"{BASE_URL}/v1/stations"},
-    {"label": "GET /api/stations",      "url": f"{BASE_URL}/api/stations"},
-    {"label": "GET /healthz",           "url": f"{BASE_URL}/healthz"},
-    {"label": "GET /health",            "url": f"{BASE_URL}/health"},
-    {"label": "GET /stationsFullVersion","url": f"{BASE_URL}/stationsFullVersion", "params": {"plugTypes": '["Tipo 2","CCS 2","CHAdeMO"]', "fast": "false", "searchText": ""}},
-]
+client = httpx.Client(base_url=BASE_URL, headers=HEADERS, timeout=20, follow_redirects=True)
+SEP = "-" * 65
 
 
-# ─── Helpers ───────────────────────────────────────────────────────────────────
-
-def fmt_sep(char="─", width=70):
-    return char * width
-
-def summarize_stations(data: list) -> dict:
-    """Extrai estatísticas do array de estações."""
-    if not isinstance(data, list) or not data:
-        return {}
-
-    total = len(data)
-    states = {}
-    plug_types = {}
-    currents = {}
-    private_count = 0
-    companies = set()
-    charging_now = []
-
-    for s in data:
-        # status
-        state = s.get("stateName", "Unknown")
-        states[state] = states.get(state, 0) + 1
-
-        # privado
-        if s.get("private"):
-            private_count += 1
-
-        # empresa
-        if s.get("parentCompanyID"):
-            companies.add(s["parentCompanyID"])
-
-        # corrente
-        curr = s.get("current", "?")
-        currents[curr] = currents.get(curr, 0) + 1
-
-        # sessão ativa agora
-        if state == "Charging":
-            charging_now.append({
-                "name": s.get("name"),
-                "started": s.get("startChargingOn"),
-                "expires": s.get("startExpiresOn"),
-            })
-
-        # plugs
-        for p in s.get("connectedPlugs", []):
-            pname = p.get("name", "?")
-            plug_types[pname] = plug_types.get(pname, 0) + 1
-
-    return {
-        "total_stations": total,
-        "estados": states,
-        "correntes": currents,
-        "tipos_de_plug": plug_types,
-        "privadas": private_count,
-        "publicas": total - private_count,
-        "empresas_unicas": len(companies),
-        "carregando_agora": charging_now,
-    }
-
-
-def test_endpoint(client: httpx.Client, label: str, url: str, params: dict = None) -> dict:
-    result = {
-        "label": label,
-        "url": url,
-        "params": params,
-        "status": None,
-        "response_type": None,
-        "item_count": None,
-        "sample": None,
-        "summary": None,
-        "error": None,
-    }
+def probe(method, path, **kwargs):
     try:
-        r = client.get(url, params=params, timeout=15)
-        result["status"] = r.status_code
-
-        if r.status_code == 200:
-            try:
-                data = r.json()
-                result["response_type"] = type(data).__name__
-
-                if isinstance(data, list):
-                    result["item_count"] = len(data)
-                    result["sample"] = data[0] if data else None
-                    result["summary"] = summarize_stations(data)
-                elif isinstance(data, dict):
-                    result["item_count"] = len(data.keys())
-                    result["sample"] = data
-            except Exception as e:
-                result["response_type"] = "text"
-                result["sample"] = r.text[:300]
-        else:
-            result["error"] = r.text[:200]
-
+        resp = getattr(client, method)(path, **kwargs)
+        return resp.status_code, resp.text[:600]
     except httpx.TimeoutException:
-        result["error"] = "TIMEOUT"
-    except Exception as e:
-        result["error"] = str(e)
-
-    return result
+        return -1, "TIMEOUT"
+    except Exception as exc:
+        return -2, str(exc)
 
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
+def report(label, status, body):
+    if status == 200:
+        print(f"  OK [{status}]  {label}")
+        print(f"         -> {body[:400]}")
+        print()
+    elif status not in (404, 405, 422, -1, -2):
+        print(f"  ?? [{status}]  {label}  ->  {body[:120]}")
+    else:
+        print(f"   . [{status}]  {label}")
 
-def main():
-    print(fmt_sep("═"))
-    print(f"  TUPI API EXPLORER — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(fmt_sep("═"))
 
-    results = []
+# ---------- STEP 1: pegar IDs reais ----------
+print(SEP)
+print("STEP 1 - buscando IDs reais de estacoes")
+print(SEP)
 
-    with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
+_qs = {"plugTypes": json.dumps(PLUG_TYPES), "fast": "false", "searchText": ""}
+status, body = probe("get", "/stationsShortVersion", params=_qs)
+print(f"  GET /stationsShortVersion -> {status}")
+if status != 200:
+    print("  Falhou - encerrando.")
+    sys.exit(1)
 
-        # ── 1. Testar endpoints principais ──────────────────────────────────
-        print("\n📡 TESTANDO ENDPOINTS DE ESTAÇÕES\n" + fmt_sep())
-        for ep in STATION_ENDPOINTS:
-            r = test_endpoint(client, ep["label"], ep["url"], ep.get("params"))
-            results.append(r)
+stations_raw = client.get("/stationsShortVersion", params=_qs).json()
+if isinstance(stations_raw, dict):
+    stations_raw = stations_raw.get("stations") or stations_raw.get("data") or []
 
-            status_icon = "✅" if r["status"] == 200 else "❌"
-            print(f"\n{status_icon} {r['label']}")
-            print(f"   URL    : {r['url']}")
-            print(f"   Params : {r['params']}")
-            print(f"   Status : {r['status']}")
+print(f"  Total de estacoes: {len(stations_raw)}")
 
-            if r["status"] == 200:
-                print(f"   Tipo   : {r['response_type']}")
-                print(f"   Items  : {r['item_count']}")
-                if r["summary"]:
-                    s = r["summary"]
-                    print(f"   ┌─ Total estações   : {s['total_stations']}")
-                    print(f"   ├─ Públicas         : {s['publicas']}")
-                    print(f"   ├─ Privadas         : {s['privadas']}")
-                    print(f"   ├─ Empresas únicas  : {s['empresas_unicas']}")
-                    print(f"   ├─ Correntes        : {s['correntes']}")
-                    print(f"   ├─ Status           : {s['estados']}")
-                    print(f"   ├─ Tipos de plug    : {s['tipos_de_plug']}")
-                    charging = s["carregando_agora"]
-                    print(f"   └─ Carregando AGORA : {len(charging)} estação(ões)")
-                    for c in charging[:3]:
-                        print(f"        • {c['name']} | início: {c['started']}")
-            else:
-                print(f"   Erro   : {r['error']}")
+samples = stations_raw[:5]
+station_ids = [str(s.get("_id") or s.get("id") or s.get("stationId") or "") for s in samples]
+station_ids = [x for x in station_ids if x]
+station_code_ids = [str(s.get("stationID") or s.get("station_id") or "") for s in samples]
+station_code_ids = [x for x in station_code_ids if x]
+print(f"  _id samples:       {station_ids}")
+print(f"  stationID samples: {station_code_ids}")
 
-        # ── 2. Testar discovery de outros endpoints ──────────────────────────
-        print("\n\n🔍 DISCOVERY DE OUTROS ENDPOINTS\n" + fmt_sep())
-        for ep in OTHER_ENDPOINTS:
-            r = test_endpoint(client, ep["label"], ep["url"], ep.get("params"))
-            results.append(r)
-            status_icon = "✅" if r["status"] == 200 else ("⚠️ " if r["status"] and r["status"] < 500 else "❌")
-            detail = f"items={r['item_count']}" if r["item_count"] is not None else (r["error"] or "")
-            print(f"  {status_icon} [{r['status']}] {r['label']} — {detail}")
+connector_ids = []
+if samples:
+    conns = (samples[0].get("connectors") or samples[0].get("plugs")
+             or samples[0].get("connectedPlugs") or [])
+    connector_ids = [str(c.get("id") or c.get("connectorId") or c.get("_id") or "")
+                     for c in conns if c]
+    connector_ids = [x for x in connector_ids if x]
+print(f"  Connector IDs (posto 0): {connector_ids}")
 
-        # ── 3. Testar endpoint de estação individual (com ID da response) ────
-        print("\n\n🏪 TESTANDO ENDPOINT DE ESTAÇÃO INDIVIDUAL\n" + fmt_sep())
+print(f"\n  Chaves do posto[0]: {list(samples[0].keys()) if samples else '--'}")
+if samples:
+    for k, v in samples[0].items():
+        print(f"    {k}: {str(v)[:100]}")
 
-        # Pega um _id real da primeira response bem-sucedida
-        first_id = None
-        first_station_id = None
-        for r in results:
-            if r["status"] == 200 and r["sample"] and isinstance(r["sample"], dict):
-                first_id = r["sample"].get("_id")
-                first_station_id = r["sample"].get("stationID")
-                break
+sid  = station_ids[0]       if station_ids       else "1"
+scid = station_code_ids[0]  if station_code_ids  else "CPHT001"
+cid  = connector_ids[0]     if connector_ids     else "1"
 
-        if first_id:
-            for path in [f"/stations/{first_id}", f"/station/{first_id}",
-                         f"/stationsShortVersion/{first_id}", f"/charger/{first_id}",
-                         f"/stations/{first_station_id}"]:
-                r = test_endpoint(client, f"GET {path}", f"{BASE_URL}{path}")
-                status_icon = "✅" if r["status"] == 200 else "❌"
-                print(f"  {status_icon} [{r['status']}] {path}")
-                if r["status"] == 200 and r["sample"]:
-                    extra_fields = [k for k in r["sample"].keys()
-                                    if k not in ("_id","name","lat","lng","stateName","connectedPlugs")]
-                    print(f"       Campos extras: {extra_fields}")
+now       = datetime.now(timezone.utc)
+since     = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+until     = now.strftime("%Y-%m-%d")
+since_iso = (now - timedelta(days=30)).isoformat()
+until_iso = now.isoformat()
+print()
+
+# ---------- STEP 2: endpoints globais ----------
+print(SEP)
+print("STEP 2 - endpoints globais de historico")
+print(SEP)
+
+global_candidates = [
+    ("get",  "/sessions",            {}),
+    ("get",  "/transactions",        {}),
+    ("get",  "/history",             {}),
+    ("get",  "/chargeHistory",       {}),
+    ("get",  "/chargeSessions",      {}),
+    ("get",  "/charging-sessions",   {}),
+    ("get",  "/charging-history",    {}),
+    ("get",  "/events",              {}),
+    ("get",  "/logs",                {}),
+    ("get",  "/availability",        {}),
+    ("get",  "/availabilityHistory", {}),
+    ("get",  "/occupancy",           {}),
+    ("get",  "/occupancyHistory",    {}),
+    ("get",  "/status/history",      {}),
+    ("get",  "/reports",             {}),
+    ("get",  "/analytics",           {}),
+    ("get",  "/statistics",          {}),
+    ("get",  "/stats",               {}),
+    ("get",  "/metrics",             {}),
+    ("get",  "/stationHistory",      {}),
+    ("get",  "/stationsHistory",     {}),
+    ("get",  "/stationsFullVersion", {"params": {"plugTypes": json.dumps(PLUG_TYPES), "fast": "false"}}),
+    ("get",  "/connector/history",   {}),
+    ("post", "/history",             {"json": {"from": since, "to": until}}),
+    ("post", "/sessions",            {"json": {"from": since, "to": until}}),
+    ("post", "/chargeSessions",      {"json": {"from": since, "to": until}}),
+]
+
+for method, path, kwargs in global_candidates:
+    s, b = probe(method, path, **kwargs)
+    report(f"{method.upper()} {path}", s, b)
+    time.sleep(0.12)
+
+# ---------- STEP 3: por estacao (usando _id e stationID) ----------
+for label, station_ref in [("_id", sid), ("stationID", scid)]:
+    print(SEP)
+    print(f"STEP 3 - por estacao [{label}={station_ref}]")
+    print(SEP)
+
+    per_station = [
+        ("get",  f"/station/{station_ref}/history",            {}),
+        ("get",  f"/station/{station_ref}/sessions",           {}),
+        ("get",  f"/station/{station_ref}/transactions",       {}),
+        ("get",  f"/station/{station_ref}/events",             {}),
+        ("get",  f"/station/{station_ref}/logs",               {}),
+        ("get",  f"/station/{station_ref}/status/history",     {}),
+        ("get",  f"/station/{station_ref}/availability",       {}),
+        ("get",  f"/station/{station_ref}/chargeHistory",      {}),
+        ("get",  f"/station/{station_ref}/chargeSessions",     {}),
+        ("get",  f"/station/{station_ref}/charging-sessions",  {}),
+        ("get",  f"/station/{station_ref}/reports",            {}),
+        ("get",  f"/stations/{station_ref}/history",           {}),
+        ("get",  f"/stations/{station_ref}/sessions",          {}),
+        ("get",  f"/station/{station_ref}/history",  {"params": {"from": since, "to": until}}),
+        ("get",  f"/station/{station_ref}/sessions", {"params": {"from": since, "to": until}}),
+        ("get",  f"/station/{station_ref}/history",  {"params": {"startDate": since_iso, "endDate": until_iso}}),
+        ("post", f"/station/{station_ref}/history",  {"json": {"from": since, "to": until}}),
+        ("post", f"/station/{station_ref}/sessions", {"json": {"from": since, "to": until}}),
+    ]
+    for method, path, kwargs in per_station:
+        s, b = probe(method, path, **kwargs)
+        report(f"{method.upper()} {path}", s, b)
+        time.sleep(0.12)
+
+# ---------- STEP 4: por connector ----------
+if cid:
+    print(SEP)
+    print(f"STEP 4 - por connector (cid={cid})")
+    print(SEP)
+    per_conn = [
+        ("get", f"/station/{sid}/connector/{cid}/history",       {}),
+        ("get", f"/station/{sid}/connector/{cid}/sessions",      {}),
+        ("get", f"/station/{sid}/connector/{cid}/transactions",  {}),
+        ("get", f"/connector/{cid}/history",                     {}),
+        ("get", f"/connector/{cid}/sessions",                    {}),
+        ("get", f"/connectors/{cid}/history",                    {}),
+        ("get", f"/connector/{cid}/history",  {"params": {"from": since, "to": until}}),
+        ("get", f"/connector/{cid}/sessions", {"params": {"from": since, "to": until}}),
+    ]
+    for method, path, kwargs in per_conn:
+        s, b = probe(method, path, **kwargs)
+        report(f"{method.upper()} {path}", s, b)
+        time.sleep(0.12)
+
+# ---------- STEP 5: detalhe completo ----------
+print(SEP)
+print(f"STEP 5 - detalhe completo: GET /station/{sid}")
+print(SEP)
+s, b = probe("get", f"/station/{sid}")
+print(f"  status: {s}")
+if s == 200:
+    try:
+        detail = client.get(f"/station/{sid}").json()
+        if isinstance(detail, dict):
+            print(f"  Chaves: {list(detail.keys())}")
+            for k, v in detail.items():
+                print(f"    {k}: {str(v)[:150]}")
         else:
-            print("  ⚠️  Nenhum _id disponível para teste individual")
+            print(f"  Tipo: {type(detail)} -> {str(detail)[:300]}")
+    except Exception as e:
+        print(f"  Parse error: {e}")
 
-        # ── 4. Salvar JSON completo ─────────────────────────────────────────
-        output_file = "tupi_api_results.json"
-        with open(output_file, "w", encoding="utf-8") as f:
-            # Salva só o resultado da primeira request bem-sucedida com dados completos
-            full_data = None
-            for r in results:
-                if r["status"] == 200 and r["item_count"] and r["item_count"] > 10:
-                    # re-fetch para pegar dados completos (não só sample)
-                    try:
-                        resp = client.get(r["url"], params=r["params"], timeout=20)
-                        full_data = resp.json()
-                        break
-                    except:
-                        pass
-            json.dump(full_data or [], f, ensure_ascii=False, indent=2)
+# ---------- STEP 6: endpoints que exigem auth ----------
+print()
+print(SEP)
+print("STEP 6 - endpoints que podem exigir autenticacao (401/403)")
+print(SEP)
+auth_candidates = [
+    ("get", "/user/sessions"),
+    ("get", "/user/history"),
+    ("get", "/me/sessions"),
+    ("get", "/me/history"),
+    ("get", "/account/sessions"),
+    ("get", "/admin/sessions"),
+    ("get", "/admin/history"),
+    ("get", "/dashboard"),
+    ("get", "/dashboard/history"),
+    ("get", "/operator/sessions"),
+    ("get", "/operator/history"),
+]
+for method, path in auth_candidates:
+    s, b = probe(method, path)
+    if s in (401, 403):
+        print(f"  !! [{s}] {method.upper()} {path}  <- REQUER AUTH (endpoint existe!)")
+    elif s == 200:
+        report(f"{method.upper()} {path}", s, b)
+    else:
+        print(f"   . [{s}] {method.upper()} {path}")
+    time.sleep(0.12)
 
-        print(f"\n\n💾 Dados completos salvos em: {output_file}")
-
-    # ── Resumo final ────────────────────────────────────────────────────────
-    print("\n" + fmt_sep("═"))
-    print("  RESUMO FINAL")
-    print(fmt_sep("═"))
-    ok = [r for r in results if r["status"] == 200]
-    fail = [r for r in results if r["status"] != 200]
-    print(f"  ✅ Endpoints funcionando : {len(ok)}")
-    print(f"  ❌ Endpoints com erro    : {len(fail)}")
-    if ok:
-        print("\n  Endpoints disponíveis:")
-        for r in ok:
-            print(f"    • {r['label']} → {r['item_count']} items")
-    print(fmt_sep("═"))
-
-
-if __name__ == "__main__":
-    main()
+print()
+print(SEP)
+print("DONE")
+print(SEP)
