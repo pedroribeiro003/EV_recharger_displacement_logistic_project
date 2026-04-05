@@ -79,9 +79,19 @@ class OsmIngester:
         self.client = httpx.Client(timeout=300)
 
     def fetch_pois(self, category: str, query: str) -> list[dict]:
+        import time as _time
         logger.info("OSM: fetching category=%s", category)
-        resp = self.client.post(settings.overpass_url, data={"data": query})
-        resp.raise_for_status()
+        for attempt in range(1, 6):
+            resp = self.client.post(settings.overpass_url, data={"data": query})
+            if resp.status_code == 429:
+                wait = 60 * attempt
+                logger.warning("OSM: 429 rate limit (attempt %d/5) — aguardando %ds", attempt, wait)
+                _time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            raise RuntimeError(f"OSM: {category} falhou após 5 tentativas (429)")
         elements = resp.json().get("elements", [])
 
         pois = []
@@ -162,7 +172,7 @@ class OsmIngester:
 
         # Fetch all categories concurrently (pure HTTP, no shared state)
         results: dict[str, list[dict]] = {}
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=1) as pool:
             futs = {
                 pool.submit(self.fetch_pois, cat, query): cat
                 for cat, query in QUERIES.items()
