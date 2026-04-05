@@ -18,44 +18,15 @@ services:
       timeout: 5s
       retries: 20
 
-  # ── Poll contínuo (snapshots a cada POLL_INTERVAL segundos) ──────────
-  poll:
+  # ── run_all — verifica banco, ingere o que faltar, inicia poll ────────
+  app:
     build: .
-    command: ["python", "main.py", "ingest", "tupi", "--poll"]
+    command: ["python", "run_all.py"]
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:${DB_PASSWORD:-changeme}@db:5432/ev_demand
       TUPI_BASE_URL: ${TUPI_BASE_URL:-https://api.tupinambaenergia.com.br}
       TUPI_ORIGIN: ${TUPI_ORIGIN:-https://tupimob.com}
       POLL_INTERVAL: ${POLL_INTERVAL:-300}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: always
-
-  # ── Enrich — roda uma vez para popular as estações ───────────────────
-  enrich:
-    build: .
-    command: ["python", "main.py", "ingest", "tupi"]
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:${DB_PASSWORD:-changeme}@db:5432/ev_demand
-      TUPI_BASE_URL: ${TUPI_BASE_URL:-https://api.tupinambaenergia.com.br}
-      TUPI_ORIGIN: ${TUPI_ORIGIN:-https://tupimob.com}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-    profiles: ["enrich"]
-
-  # ── Pipeline completo (IBGE + ANP + IPEA + OSM) ──────────────────────
-  ingest:
-    build: .
-    command: ["python", "main.py", "ingest", "all"]
-    environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:${DB_PASSWORD:-changeme}@db:5432/ev_demand
-      TUPI_BASE_URL: ${TUPI_BASE_URL:-https://api.tupinambaenergia.com.br}
-      TUPI_ORIGIN: ${TUPI_ORIGIN:-https://tupimob.com}
       ANP_BASE_URL: ${ANP_BASE_URL:-https://www.anp.gov.br/api}
       IPEA_BASE_URL: ${IPEA_BASE_URL:-http://www.ipeadata.gov.br/api/odata4}
       OVERPASS_URL: ${OVERPASS_URL:-https://overpass-api.de/api/interpreter}
@@ -63,8 +34,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: "no"
-    profiles: ["ingest"]
+    restart: always
 
 volumes:
   pgdata:
