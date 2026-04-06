@@ -1,4 +1,3 @@
-import json
 import time
 from datetime import date, datetime, timezone
 
@@ -77,7 +76,6 @@ class AneelIngester:
                     "resource_id": _RESOURCE_ID,
                     "limit": _LIMIT,
                     "offset": offset,
-                    "filters": json.dumps(_FILTERS, ensure_ascii=False),
                 },
             )
             result = resp.json().get("result", {})
@@ -85,10 +83,12 @@ class AneelIngester:
             if not batch:
                 break
 
-            # Keep only records still valid today
+            # Filter in Python — avoids CKAN encoding issues with accented chars
             active = [
                 r for r in batch
-                if not r.get("DatFimVigencia") or r["DatFimVigencia"] >= today
+                if r.get("DscBaseTarifaria") == "Tarifa de Aplicação"
+                and r.get("DscUnidadeTerciaria") == "MWh"
+                and (not r.get("DatFimVigencia") or r["DatFimVigencia"] >= today)
             ]
             records.extend(active)
             logger.debug("ANEEL: offset=%d batch=%d active=%d total_so_far=%d",
