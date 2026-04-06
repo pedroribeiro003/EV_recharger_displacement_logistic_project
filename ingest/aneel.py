@@ -9,15 +9,9 @@ from core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_CKAN_BASE = "https://dadosabertos.aneel.gov.br/api/3/action/datastore_search"
+_CKAN_SQL = "https://dadosabertos.aneel.gov.br/api/3/action/datastore_search_sql"
 _RESOURCE_ID = "fcf2906c-7c32-4b9b-a637-054e7a5234f4"
-_LIMIT = 5000
-
-# Only fetch "Tarifa de Aplicação" (applied tariff, not theoretical base) for energy (MWh unit)
-_FILTERS = {
-    "DscBaseTarifaria": "Tarifa de Aplicação",
-    "DscUnidadeTerciaria": "MWh",
-}
+_LIMIT = 2000
 
 
 def _parse_decimal(value: str | None) -> float | None:
@@ -45,62 +39,62 @@ class AneelIngester:
         self.session = session
         self.client = httpx.Client(
             headers={"Accept": "application/json"},
-            timeout=60,
+            timeout=120,
             follow_redirects=True,
         )
 
     def _get_with_retry(self, **kwargs) -> httpx.Response:
-        """GET with exponential backoff for 5xx errors (max 4 attempts)."""
+        """GET with exponential backoff for 5xx errors and timeouts (max 4 attempts)."""
         for attempt in range(1, 5):
-            resp = self.client.get(**kwargs)
-            if resp.status_code < 500:
-                resp.raise_for_status()
-                return resp
-            wait = 15 * attempt
-            logger.warning("ANEEL: HTTP %d (attempt %d/4) — retrying in %ds",
-                           resp.status_code, attempt, wait)
+            try:
+                resp = self.client.get(**kwargs)
+                if resp.status_code < 500:
+                    resp.raise_for_status()
+                    return resp
+                wait = 15 * attempt
+                logger.warning("ANEEL: HTTP %d (attempt %d/4) — retrying in %ds",
+                               resp.status_code, attempt, wait)
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as exc:
+                wait = 15 * attempt
+                logger.warning("ANEEL: timeout (attempt %d/4) — retrying in %ds: %s",
+                               attempt, wait, exc)
             time.sleep(wait)
-        resp.raise_for_status()
-        return resp  # unreachable, satisfies type checker
+        raise RuntimeError("ANEEL: gave up after 4 attempts")
 
     def fetch_current_tariffs(self) -> list[dict]:
-        """Paginate CKAN datastore for all current active tariffs."""
+        """Paginate via SQL endpoint using keyset (_id > last_id) to avoid offset limits."""
         today = date.today().isoformat()
         records: list[dict] = []
-        offset = 0
-        total = None
+        last_id = 0
 
         while True:
-            resp = self._get_with_retry(
-                url=_CKAN_BASE,
-                params={
-                    "resource_id": _RESOURCE_ID,
-                    "limit": _LIMIT,
-                    "offset": offset,
-                },
+            sql = (
+                f'SELECT "_id","SigAgente","NumCNPJDistribuidora",'
+                f'"DatInicioVigencia","DatFimVigencia","DscBaseTarifaria",'
+                f'"DscSubGrupo","DscModalidadeTarifaria","DscUnidadeTerciaria",'
+                f'"VlrTUSD","VlrTE" '
+                f'FROM "{_RESOURCE_ID}" '
+                f'WHERE "_id" > {last_id} '
+                f"AND \"DscUnidadeTerciaria\" = 'MWh' "
+                f"AND \"DatFimVigencia\" >= '{today}' "
+                f'ORDER BY "_id" '
+                f'LIMIT {_LIMIT}'
             )
-            result = resp.json().get("result", {})
-            batch = result.get("records", [])
+            resp = self._get_with_retry(url=_CKAN_SQL, params={"sql": sql})
+            raw_batch = resp.json().get("result", {}).get("records", [])
 
-            if total is None:
-                total = result.get("total", 0)
-                logger.info("ANEEL: total rows in resource=%d", total)
-
-            if not batch:
+            if not raw_batch:
                 break
 
-            # Filter in Python — avoids CKAN encoding issues with accented chars
-            active = [
-                r for r in batch
-                if r.get("DscBaseTarifaria") == "Tarifa de Aplicação"
-                and r.get("DscUnidadeTerciaria") == "MWh"
-                and (not r.get("DatFimVigencia") or r["DatFimVigencia"] >= today)
-            ]
-            records.extend(active)
-            offset += len(batch)
-            logger.debug("ANEEL: offset=%d/%d active_so_far=%d", offset, total, len(records))
+            last_id = raw_batch[-1]["_id"]
 
-            if offset >= total:
+            # Filter DscBaseTarifaria in Python to avoid accent encoding issues
+            active = [r for r in raw_batch
+                      if "Aplica" in (r.get("DscBaseTarifaria") or "")]
+            records.extend(active)
+            logger.debug("ANEEL: fetched %d records so far (last_id=%d)", len(records), last_id)
+
+            if len(batch) < _LIMIT:
                 break
 
         logger.info("ANEEL: fetched %d active tariff records", len(records))

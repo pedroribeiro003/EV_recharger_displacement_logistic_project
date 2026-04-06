@@ -30,7 +30,9 @@
       "Bash(curl -v \"https://servicodados.ibge.gov.br/api/v3/agregados/6579/periodos/2024/variaveis/9324?localidades=N6%5B3304557,3550308%5D\")",
       "Bash(curl:*)",
       "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for group in data: for agr in group.get\\('agregados', []\\): name = agr['nome'].lower\\(\\) if \\('área' in name or 'area' in name\\) and \\('territorial' in name or 'unidade' in name\\): print\\(json.dumps\\({'grupo': group['nome'], 'id': agr['id'], 'nome': agr['nome']}, ensure_ascii=False\\)\\) \")",
-      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for group in data: for agr in group.get\\('agregados', []\\): name = agr['nome'].lower\\(\\) if 'área' in name and \\('densidade' in name or 'territorial' in name\\): print\\(json.dumps\\({'grupo': group['nome'], 'id': agr['id'], 'nome': agr['nome']}, ensure_ascii=False\\)\\) \")"
+      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for group in data: for agr in group.get\\('agregados', []\\): name = agr['nome'].lower\\(\\) if 'área' in name and \\('densidade' in name or 'territorial' in name\\): print\\(json.dumps\\({'grupo': group['nome'], 'id': agr['id'], 'nome': agr['nome']}, ensure_ascii=False\\)\\) \")",
+      "Bash(python:*)",
+      "Bash(python3:*)"
     ]
   }
 }
