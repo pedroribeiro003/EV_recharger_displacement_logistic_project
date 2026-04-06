@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import date, datetime, timezone
 
@@ -76,7 +77,7 @@ class AneelIngester:
                     "resource_id": _RESOURCE_ID,
                     "limit": _LIMIT,
                     "offset": offset,
-                    "filters": str(_FILTERS).replace("'", '"'),
+                    "filters": json.dumps(_FILTERS, ensure_ascii=False),
                 },
             )
             result = resp.json().get("result", {})

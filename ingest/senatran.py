@@ -127,7 +127,22 @@ class SenatranIngester:
         self.client = httpx.Client(headers=_HEADERS, timeout=120, follow_redirects=True)
 
     def _parse_xlsx(self, content: bytes) -> pd.DataFrame:
-        df = pd.read_excel(io.BytesIO(content), dtype=str)
+        # Read without header to find the real header row (file has title rows on top)
+        raw = pd.read_excel(io.BytesIO(content), header=None, dtype=str)
+
+        header_row = None
+        for i, row in raw.iterrows():
+            row_str = " ".join(str(v).lower() for v in row if pd.notna(v) and str(v) != "nan")
+            if any(k in row_str for k in ("cod", "municipio", "município", "combustivel", "combustível")):
+                header_row = i
+                break
+
+        if header_row is None:
+            raise ValueError(
+                f"SENATRAN: could not find header row. First row: {list(raw.iloc[0])}"
+            )
+
+        df = pd.read_excel(io.BytesIO(content), header=header_row, dtype=str)
         df.columns = [c.strip() for c in df.columns]
         return df
 
