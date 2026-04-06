@@ -8,8 +8,6 @@ from db.models.anp import AnpGasStation
 
 logger = get_logger(__name__)
 
-_PAGE_SIZE = 1000
-
 
 class AnpIngester:
     def __init__(self, session: Session) -> None:
@@ -18,18 +16,17 @@ class AnpIngester:
             base_url=settings.anp_base_url,
             headers={"Accept": "application/json"},
             timeout=60,
-            follow_redirects=True,
         )
 
     def fetch_all_stations(self) -> list[dict]:
-        """Paginate GET /Combustivel until exhausted."""
+        """Paginate GET /v1/combustivel until exhausted."""
         results: list[dict] = []
         page = 1
         while True:
             try:
                 resp = self.client.get(
-                    "/Combustivel",
-                    params={"page": page, "per_page": _PAGE_SIZE},
+                    "/v1/combustivel",
+                    params={"numeropagina": page},
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -42,8 +39,6 @@ class AnpIngester:
                 break
             results.extend(batch)
             logger.debug("ANP: page %d → %d records", page, len(batch))
-            if len(batch) < _PAGE_SIZE:
-                break
             page += 1
 
         logger.info("ANP: fetched %d gas stations total", len(results))

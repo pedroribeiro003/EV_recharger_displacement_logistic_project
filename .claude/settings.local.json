@@ -16,7 +16,9 @@
       "WebFetch(domain:static.electricitymaps.com)",
       "WebFetch(domain:tech.marksblogg.com)",
       "WebFetch(domain:developers.enode.com)",
-      "WebFetch(domain:chargemap.com)"
+      "WebFetch(domain:chargemap.com)",
+      "WebFetch(domain:revendedoresapi.anp.gov.br)",
+      "WebFetch(domain:dados.gov.br)"
     ]
   }
 }
