@@ -53,7 +53,17 @@ class IpeaIngester:
             resp = self.client.get(url)
             resp.raise_for_status()
             data = resp.json()
-            return data.get("value") or data if isinstance(data, list) else []
+            # Log structure on first call to diagnose format
+            if isinstance(data, dict):
+                logger.info("IPEA %s: response keys=%s, value type=%s, value len=%s",
+                            serie_code, list(data.keys()),
+                            type(data.get("value")).__name__,
+                            len(data.get("value") or []))
+            elif isinstance(data, list):
+                logger.info("IPEA %s: response is list, len=%d", serie_code, len(data))
+            if isinstance(data, list):
+                return data
+            return data.get("value") or []
         except Exception as exc:
             logger.warning("IPEA fetch failed for %s: %s", serie_code, exc)
             return []
