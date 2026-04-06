@@ -26,3 +26,5 @@ Thumbs.db
 # Temp
 temp.py
 *.bat
+
+.claude
