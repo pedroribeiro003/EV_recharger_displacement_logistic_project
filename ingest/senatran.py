@@ -1,4 +1,6 @@
 import io
+import re
+import time
 from datetime import date
 
 import httpx
@@ -10,68 +12,119 @@ from core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_BASE_URL = (
-    "https://www.gov.br/senatran/pt-br/assuntos/rnatrc/"
-    "frota-de-veiculos/{year}/frota_por_municipio_e_tipo_{mon}_{year}.xlsx"
+_INDEX_URL = (
+    "https://www.gov.br/transportes/pt-br/assuntos/transito/"
+    "conteudo-Senatran/frota-de-veiculos-{year}"
 )
-_MONTHS_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
-               "jul", "ago", "set", "out", "nov", "dez"]
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.gov.br/transportes/pt-br/assuntos/transito",
+}
 
 _EV_FUELS = {"ELETRICO", "ELÉTRICO", "ELETRICO HIBRIDO", "ELÉTRICO HÍBRIDO"}
 _HYBRID_FUELS = {"HIBRIDO", "HÍBRIDO", "ELETRICO HIBRIDO", "ELÉTRICO HÍBRIDO"}
 
-# Possible column name variants across file editions
-_COL_IBGE   = ["codigo_municipio", "codigo_ibge", "cod_municipio", "codigomunicipio"]
-_COL_FUEL   = ["combustivel", "tipo_combustivel"]
-_COL_VTYPE  = ["tipo", "tipo_veiculo", "tipoveiculo"]
-_COL_COUNT  = ["quantidade", "total", "qtd"]
+_COL_IBGE  = ["codigo_municipio", "codigo_ibge", "cod_municipio", "codigomunicipio"]
+_COL_FUEL  = ["combustivel", "tipo_combustivel"]
+_COL_VTYPE = ["tipo", "tipo_veiculo", "tipoveiculo"]
+_COL_COUNT = ["quantidade", "total", "qtd"]
+
+# Portuguese month names for detecting the most recent file
+_MONTH_ORDER = [
+    "janeiro", "fevereiro", "março", "marco", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    cols_lower = {c.lower(): c for c in df.columns}
+    cols_lower = {c.lower().strip(): c for c in df.columns}
     for c in candidates:
         if c in cols_lower:
             return cols_lower[c]
     raise KeyError(f"None of {candidates} found in columns: {list(df.columns)}")
 
 
-def _latest_available_file(client: httpx.Client) -> tuple[int, int, bytes]:
-    """Try months backwards from today until a file downloads successfully."""
+def _month_rank(href: str) -> int:
+    """Return position of month name in href (higher = more recent)."""
+    href_lower = href.lower()
+    for i, m in enumerate(_MONTH_ORDER):
+        if m in href_lower:
+            return i
+    return -1
+
+
+def _scrape_fleet_links(client: httpx.Client, year: int) -> list[str]:
+    """Return hrefs of fleet-by-municipality files from the year index page."""
+    url = _INDEX_URL.format(year=year)
+    logger.info("SENATRAN: scraping index %s", url)
+    try:
+        resp = client.get(url)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("SENATRAN: index %d unreachable: %s", year, exc)
+        return []
+
+    # Find all href values in the HTML
+    hrefs = re.findall(r'href=["\']([^"\']+)["\']', resp.text)
+
+    fleet_links = []
+    for href in hrefs:
+        lower = href.lower()
+        if not (lower.endswith(".xlsx") or lower.endswith(".xls")):
+            continue
+        # Must mention municipio (with possible accent/typo) to be the right file type
+        if not re.search(r"munic[íi]?p", lower):
+            continue
+        # Resolve relative URLs
+        if href.startswith("http"):
+            fleet_links.append(href)
+        elif href.startswith("/"):
+            fleet_links.append("https://www.gov.br" + href)
+        else:
+            fleet_links.append(f"https://www.gov.br/transportes/pt-br/assuntos/transito/conteudo-Senatran/{href}")
+
+    logger.info("SENATRAN: found %d fleet file links for %d", len(fleet_links), year)
+    return fleet_links
+
+
+def _download_latest(client: httpx.Client) -> tuple[int, int, bytes]:
+    """Scrape index pages and download the most recent available fleet file."""
     today = date.today()
-    for delta in range(2, 8):  # start 2 months back (data released ~60 days late)
-        month = today.month - delta
-        year = today.year
-        while month <= 0:
-            month += 12
-            year -= 1
-        mon_str = _MONTHS_PT[month - 1]
-        url = _BASE_URL.format(year=year, mon=mon_str)
-        logger.info("SENATRAN: trying %s/%s (%s)", year, mon_str, url)
-        try:
-            resp = client.get(url)
-            if resp.status_code == 200:
-                logger.info("SENATRAN: found file %s/%s (%d bytes)", year, mon_str, len(resp.content))
-                return year, month, resp.content
-            logger.debug("SENATRAN: %s/%s → HTTP %d", year, mon_str, resp.status_code)
-        except Exception as exc:
-            logger.debug("SENATRAN: %s/%s → %s", year, mon_str, exc)
-    raise RuntimeError("SENATRAN: no available file found in the last 8 months")
+    for year in [today.year, today.year - 1]:
+        links = _scrape_fleet_links(client, year)
+        if not links:
+            continue
+
+        # Sort by month rank descending (most recent month first)
+        links_sorted = sorted(links, key=_month_rank, reverse=True)
+
+        for href in links_sorted:
+            logger.info("SENATRAN: trying %s", href)
+            try:
+                resp = client.get(href)
+                if resp.status_code == 200 and len(resp.content) > 10_000:
+                    month = _month_rank(href) + 1  # 1-indexed
+                    if month <= 0:
+                        month = 12  # fallback if month not detected
+                    logger.info(
+                        "SENATRAN: downloaded %s (%d bytes), inferred month=%d",
+                        href, len(resp.content), month,
+                    )
+                    return year, month, resp.content
+                logger.debug("SENATRAN: %s → HTTP %d", href, resp.status_code)
+            except Exception as exc:
+                logger.debug("SENATRAN: %s → %s", href, exc)
+
+    raise RuntimeError("SENATRAN: no fleet file found after scraping index pages")
 
 
 class SenatranIngester:
     def __init__(self, session: Session) -> None:
         self.session = session
-        self.client = httpx.Client(
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Referer": "https://www.gov.br/senatran/pt-br/assuntos/rnatrc/frota-de-veiculos",
-            },
-            timeout=120,
-            follow_redirects=True,
-        )
+        self.client = httpx.Client(headers=_HEADERS, timeout=120, follow_redirects=True)
 
     def _parse_xlsx(self, content: bytes) -> pd.DataFrame:
         df = pd.read_excel(io.BytesIO(content), dtype=str)
@@ -100,25 +153,24 @@ class SenatranIngester:
 
             rows.append({
                 "municipality_id": mun_id,
-                "year": year,
-                "month": month,
-                "fuel_type": fuel,
-                "vehicle_type": vtype,
-                "count": count,
-                "ev_count": count if fuel in _EV_FUELS else None,
-                "hybrid_count": count if fuel in _HYBRID_FUELS else None,
+                "year":            year,
+                "month":           month,
+                "fuel_type":       fuel,
+                "vehicle_type":    vtype,
+                "count":           count,
+                "ev_count":        count if fuel in _EV_FUELS else None,
+                "hybrid_count":    count if fuel in _HYBRID_FUELS else None,
             })
         return rows
 
     def run(self) -> None:
-        year, month, content = _latest_available_file(self.client)
+        year, month, content = _download_latest(self.client)
 
         logger.info("SENATRAN: parsing file %d/%02d", year, month)
         df = self._parse_xlsx(content)
         rows = self._build_rows(df, year, month)
         logger.info("SENATRAN: %d rows parsed", len(rows))
 
-        # Clear existing data for this reference period before re-inserting
         self.session.execute(
             text("DELETE FROM senatran_fleet WHERE year = :y AND month = :m"),
             {"y": year, "m": month},

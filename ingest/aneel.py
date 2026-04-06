@@ -1,3 +1,4 @@
+import time
 from datetime import date, datetime, timezone
 
 import httpx
@@ -48,6 +49,20 @@ class AneelIngester:
             follow_redirects=True,
         )
 
+    def _get_with_retry(self, **kwargs) -> httpx.Response:
+        """GET with exponential backoff for 5xx errors (max 4 attempts)."""
+        for attempt in range(1, 5):
+            resp = self.client.get(**kwargs)
+            if resp.status_code < 500:
+                resp.raise_for_status()
+                return resp
+            wait = 15 * attempt
+            logger.warning("ANEEL: HTTP %d (attempt %d/4) — retrying in %ds",
+                           resp.status_code, attempt, wait)
+            time.sleep(wait)
+        resp.raise_for_status()
+        return resp  # unreachable, satisfies type checker
+
     def fetch_current_tariffs(self) -> list[dict]:
         """Paginate CKAN datastore for all current active tariffs."""
         today = date.today().isoformat()
@@ -55,8 +70,8 @@ class AneelIngester:
         offset = 0
 
         while True:
-            resp = self.client.get(
-                _CKAN_BASE,
+            resp = self._get_with_retry(
+                url=_CKAN_BASE,
                 params={
                     "resource_id": _RESOURCE_ID,
                     "limit": _LIMIT,
@@ -64,7 +79,6 @@ class AneelIngester:
                     "filters": str(_FILTERS).replace("'", '"'),
                 },
             )
-            resp.raise_for_status()
             result = resp.json().get("result", {})
             batch = result.get("records", [])
             if not batch:
