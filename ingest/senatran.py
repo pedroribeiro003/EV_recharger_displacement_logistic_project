@@ -1,6 +1,7 @@
 import io
 import re
 import time
+import unicodedata
 from datetime import date
 
 import httpx
@@ -30,13 +31,30 @@ _HYBRID_FUELS = {"HIBRIDO", "HÍBRIDO", "ELETRICO HIBRIDO", "ELÉTRICO HÍBRIDO"
 _COL_IBGE  = ["codigo_municipio", "codigo_ibge", "cod_municipio", "codigomunicipio"]
 _COL_FUEL  = ["combustivel", "tipo_combustivel"]
 _COL_VTYPE = ["tipo", "tipo_veiculo", "tipoveiculo"]
-_COL_COUNT = ["quantidade", "total", "qtd"]
+_COL_COUNT = ["quantidade", "qtd"]  # "total" excluded — it's a vehicle type column in wide format
+
+# Columns in wide format that are NOT vehicle type counts
+_WIDE_ID_COLS = {"uf", "estado", "municipio", "município", "nome", "total", "nan"}
+
+# Known vehicle type columns in the wide format file
+_VEHICLE_TYPES = {
+    "AUTOMOVEL", "BONDE", "CAMINHAO", "CAMINHAO TRATOR", "CAMINHONETE",
+    "CAMIONETA", "CHASSI PLATAF", "CICLOMOTOR", "MICRO-ONIBUS", "MOTOCICLETA",
+    "MOTONETA", "ONIBUS", "QUADRICICLO", "REBOQUE", "SEMI-REBOQUE",
+    "SIDE-CAR", "OUTROS", "TRATOR ESTEI", "TRATOR RODAS", "TRICICLO", "UTILITARIO",
+}
 
 # Portuguese month names for detecting the most recent file
 _MONTH_ORDER = [
     "janeiro", "fevereiro", "março", "marco", "abril", "maio", "junho",
     "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ]
+
+
+def _normalize(text: str) -> str:
+    """Uppercase + remove accents for fuzzy municipality name matching."""
+    nfkd = unicodedata.normalize("NFKD", text.upper())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> str:
@@ -200,44 +218,45 @@ class SenatranIngester:
             })
         return rows
 
+    def _build_municipality_lookup(self) -> dict[tuple[str, str], int]:
+        """Build {(normalized_name, uf): ibge_id} from the database."""
+        rows = self.session.execute(
+            text(
+                "SELECT m.id, m.name, s.uf "
+                "FROM ibge_municipalities m "
+                "JOIN ibge_states s ON m.state_id = s.id"
+            )
+        ).fetchall()
+        return {(_normalize(r[1]), r[2].upper()): r[0] for r in rows}
+
     def _build_rows_wide(self, df: pd.DataFrame, year: int, month: int,
                          cols_lower: dict) -> list[dict]:
         """Wide format: each column is a vehicle type, rows are municipalities."""
-        # Find the IBGE code column — it contains 7-digit integers
-        ibge_col = None
-        for col in df.columns:
-            sample = df[col].dropna().head(10)
-            digits = sum(1 for v in sample
-                         if str(v).strip().rstrip(".0").isdigit()
-                         and len(str(v).strip().rstrip(".0")) == 7)
-            if digits >= 3:
-                ibge_col = col
-                break
+        lookup = self._build_municipality_lookup()
 
-        if ibge_col is None:
+        # Find name and UF columns
+        col_name = cols_lower.get("municipio") or cols_lower.get("município")
+        col_uf   = cols_lower.get("uf") or cols_lower.get("estado")
+
+        if not col_name or not col_uf:
             raise KeyError(
-                f"SENATRAN: could not detect IBGE code column. Columns: {list(df.columns)}"
+                f"SENATRAN: could not find MUNICIPIO/UF columns. Got: {list(df.columns)}"
             )
 
-        # Columns that are NOT vehicle type counts (identifiers)
-        id_like = {"uf", "estado", "municipio", "município", "nome", "total"}
-        id_cols = [ibge_col]
-        for col in df.columns:
-            if col == ibge_col:
-                continue
-            if any(k in col.lower() for k in id_like):
-                id_cols.append(col)
+        vehicle_cols = [c for c in df.columns
+                        if c.upper() in _VEHICLE_TYPES]
 
-        vehicle_cols = [c for c in df.columns if c not in id_cols
-                        and c.lower() not in ("total", "nan")]
-
+        not_found = 0
         rows = []
         for _, row in df.iterrows():
-            try:
-                mun_id = int(str(row[ibge_col]).strip().rstrip(".0"))
-                if len(str(mun_id)) != 7:
-                    continue
-            except (ValueError, TypeError):
+            raw_name = str(row[col_name]).strip()
+            raw_uf   = str(row[col_uf]).strip().upper()
+            if raw_name in ("nan", "") or raw_uf in ("nan", ""):
+                continue
+
+            mun_id = lookup.get((_normalize(raw_name), raw_uf))
+            if mun_id is None:
+                not_found += 1
                 continue
 
             for vtype_col in vehicle_cols:
@@ -246,17 +265,19 @@ class SenatranIngester:
                 except (ValueError, TypeError):
                     count = 0
 
-                vtype = vtype_col.strip().upper()
                 rows.append({
                     "municipality_id": mun_id,
                     "year":            year,
                     "month":           month,
                     "fuel_type":       "NAO_INFORMADO",
-                    "vehicle_type":    vtype,
+                    "vehicle_type":    vtype_col.strip().upper(),
                     "count":           count,
                     "ev_count":        None,
                     "hybrid_count":    None,
                 })
+
+        if not_found:
+            logger.warning("SENATRAN: %d municipality rows not matched in IBGE lookup", not_found)
         return rows
 
     def run(self) -> None:
