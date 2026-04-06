@@ -80,6 +80,16 @@ class AneelIngester:
             )
             result = resp.json().get("result", {})
             batch = result.get("records", [])
+            if offset == 0:
+                logger.info("ANEEL: total rows in resource=%s, first batch=%d",
+                            result.get("total"), len(batch))
+                if batch:
+                    sample = batch[0]
+                    logger.info("ANEEL: sample record keys=%s", list(sample.keys()))
+                    logger.info("ANEEL: sample DscBaseTarifaria=%r DscUnidadeTerciaria=%r DatFimVigencia=%r",
+                                sample.get("DscBaseTarifaria"),
+                                sample.get("DscUnidadeTerciaria"),
+                                sample.get("DatFimVigencia"))
             if not batch:
                 break
 
