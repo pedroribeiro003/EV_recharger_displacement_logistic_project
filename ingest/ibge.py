@@ -111,8 +111,61 @@ class IbgeIngester:
         self.session.commit()
         logger.info("IBGE: updated %d municipality centroids", updated)
 
+    def fetch_population_area(self) -> None:
+        """Patch population (2025 estimate) and area_km2 (Censo 2022) via SIDRA v3."""
+        logger.info("IBGE: fetching population estimates (2025)")
+        resp_pop = self.client.get(
+            "/v3/agregados/6579/periodos/2025/variaveis/9324",
+            params={"localidades": "N6"},
+        )
+        resp_pop.raise_for_status()
+
+        logger.info("IBGE: fetching area km2 (Censo 2022)")
+        resp_area = self.client.get(
+            "/v3/agregados/4714/periodos/2022/variaveis/6318",
+            params={"localidades": "N6"},
+        )
+        resp_area.raise_for_status()
+
+        def _parse(data: list, period: str) -> dict[int, float]:
+            out: dict[int, float] = {}
+            for var_block in data:
+                for resultado in var_block.get("resultados", []):
+                    for series in resultado.get("series", []):
+                        loc_id = series["localidade"]["id"]
+                        raw = series["serie"].get(period)
+                        if raw and raw != "-":
+                            try:
+                                out[int(loc_id)] = float(str(raw).replace(",", "."))
+                            except (ValueError, TypeError):
+                                pass
+            return out
+
+        pop_by_id = _parse(resp_pop.json(), "2025")
+        area_by_id = _parse(resp_area.json(), "2022")
+
+        updated = 0
+        for mun_id, pop in pop_by_id.items():
+            self.session.execute(
+                __import__("sqlalchemy").text(
+                    "UPDATE ibge_municipalities SET population = :pop WHERE id = :id"
+                ).bindparams(pop=int(pop), id=mun_id)
+            )
+            updated += 1
+
+        for mun_id, area in area_by_id.items():
+            self.session.execute(
+                __import__("sqlalchemy").text(
+                    "UPDATE ibge_municipalities SET area_km2 = :area WHERE id = :id"
+                ).bindparams(area=area, id=mun_id)
+            )
+
+        self.session.commit()
+        logger.info("IBGE: updated population for %d municipalities", updated)
+
     def run(self) -> None:
         self.fetch_states()
         self.fetch_municipalities()
         self.fetch_centroids()
+        self.fetch_population_area()
         logger.info("IBGE ingestion complete")

@@ -19,11 +19,13 @@ logger = get_logger("run_all")
 
 # Tabela → query de checagem
 CHECKS = {
-    "ibge": "SELECT COUNT(*) FROM ibge_municipalities",
-    "anp":  "SELECT COUNT(*) FROM anp_gas_stations",
-    "ipea": "SELECT COUNT(*) FROM ipea_values",
-    "osm":  "SELECT COUNT(*) FROM osm_pois",
-    "tupi": "SELECT COUNT(*) FROM stations",
+    "ibge":     "SELECT COUNT(*) FROM ibge_municipalities",
+    "anp":      "SELECT COUNT(*) FROM anp_gas_stations",
+    "ipea":     "SELECT COUNT(*) FROM ipea_values",
+    "osm":      "SELECT COUNT(*) FROM osm_pois",
+    "tupi":     "SELECT COUNT(*) FROM stations",
+    "senatran": "SELECT COUNT(*) FROM senatran_fleet",
+    "aneel":    "SELECT COUNT(*) FROM aneel_tariffs",
 }
 
 
@@ -87,6 +89,18 @@ def run_osm():
         OsmIngester(s).run()
 
 
+def run_senatran():
+    from ingest.senatran import SenatranIngester
+    with SessionLocal() as s:
+        SenatranIngester(s).run()
+
+
+def run_aneel():
+    from ingest.aneel import AneelIngester
+    with SessionLocal() as s:
+        AneelIngester(s).run()
+
+
 def run_tupi_enrich():
     from ingest.tupi import TupiIngester
     with SessionLocal() as s:
@@ -108,20 +122,26 @@ def run_missing(missing: set[str]) -> None:
 
     logger.info("Ingestores faltantes: %s", sorted(missing))
 
-    # Fase 1 — independentes em paralelo (max 3 workers)
+    # Fase 1 — independentes em paralelo
     phase1 = {
         name: fn
-        for name, fn in [("ibge", run_ibge), ("anp", run_anp), ("tupi", run_tupi_enrich)]
+        for name, fn in [
+            ("ibge",     run_ibge),
+            ("anp",      run_anp),
+            ("aneel",    run_aneel),
+            ("senatran", run_senatran),
+            ("tupi",     run_tupi_enrich),
+        ]
         if name in missing
     }
     if phase1:
         logger.info("Fase 1 (paralelo): %s", list(phase1))
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futs = {pool.submit(_run, name, fn): name for name, fn in phase1.items()}
             for fut in as_completed(futs):
                 fut.result()
 
-    # Fase 2 — IPEA precisa do IBGE; OSM precisa do Tupi (distâncias)
+    # Fase 2 — IPEA e OSM dependem do IBGE/Tupi
     phase2 = {
         name: fn
         for name, fn in [("ipea", run_ipea), ("osm", run_osm)]

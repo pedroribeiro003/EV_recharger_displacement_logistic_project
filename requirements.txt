@@ -1,5 +1,4 @@
 # Core
-<<<<<<< HEAD
 sqlalchemy>=2.0
 alembic>=1.13
 geoalchemy2>=0.14
@@ -8,6 +7,7 @@ httpx>=0.27
 python-dotenv>=1.0
 pydantic-settings>=2.0
 pandas>=2.0
+openpyxl>=3.1
 overpy>=0.6
 
 # Dev
@@ -15,23 +15,3 @@ pytest>=8.0
 pytest-asyncio>=0.23
 ruff>=0.4
 mypy>=1.10
-=======
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-
-# HTTP
-requests>=2.31.0
-urllib3>=2.0.0
-
-# PostGIS support (opcional — instalar se usar colunas geometry)
-geoalchemy2>=0.14.0
-
-# Utils
-python-dotenv>=1.0.0
-
-# Dev / testes
-pytest>=7.4.0
-pytest-mock>=3.12.0
->>>>>>> b2d2596 (feat)
