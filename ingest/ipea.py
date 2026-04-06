@@ -15,14 +15,14 @@ logger = get_logger(__name__)
 # Relevant IPEA series codes
 SERIES: dict[str, str] = {
     "PNAD_RDMHABMAR": "Rendimento médio habitual — PNAD Contínua",
-    "PIB_MUNGDP": "PIB Municipal",
-    "CENSO_IDHM": "Índice de Desenvolvimento Humano Municipal (IDHM)",
+    "PIB_IBGE_5938_37": "PIB Municipal (preços de mercado, preços de 2010)",
+    "IDHM": "Índice de Desenvolvimento Humano Municipal (IDHM)",
 }
 
 _MUN_FIELD_MAP = {
     "PNAD_RDMHABMAR": None,          # no municipality-level data
-    "PIB_MUNGDP": "gdp_per_capita",
-    "CENSO_IDHM": "idhm",
+    "PIB_IBGE_5938_37": "gdp_per_capita",
+    "IDHM": "idhm",
 }
 
 
