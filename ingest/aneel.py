@@ -94,7 +94,7 @@ class AneelIngester:
             records.extend(active)
             logger.debug("ANEEL: fetched %d records so far (last_id=%d)", len(records), last_id)
 
-            if len(batch) < _LIMIT:
+            if len(raw_batch) < _LIMIT:
                 break
 
         logger.info("ANEEL: fetched %d active tariff records", len(records))

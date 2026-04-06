@@ -105,6 +105,9 @@ class IpeaIngester:
                     }
                 )
 
+            logger.info("IPEA: %d raw values fetched for %s, %d rows built",
+                        len(raw_values), code, len(rows))
+
             # Bulk insert (append-only)
             if rows:
                 self.session.execute(
@@ -113,6 +116,8 @@ class IpeaIngester:
                 )
                 self.session.commit()
                 logger.info("IPEA: inserted %d values for %s", len(rows), code)
+            else:
+                logger.warning("IPEA: no rows to insert for %s", code)
 
             # Patch ibge_municipalities with most recent value if applicable
             mun_field = _MUN_FIELD_MAP.get(code)
