@@ -18,6 +18,7 @@ class AnpIngester:
             base_url=settings.anp_base_url,
             headers={"Accept": "application/json"},
             timeout=60,
+            follow_redirects=True,
         )
 
     def fetch_all_stations(self) -> list[dict]:

@@ -56,14 +56,17 @@ class IbgeIngester:
         resp = self.client.get("/v1/localidades/municipios")
         resp.raise_for_status()
         municipalities = resp.json()
-        rows = [
-            {
-                "id": m["id"],
-                "name": m["nome"],
-                "state_id": m["microrregiao"]["mesorregiao"]["UF"]["id"],
-            }
-            for m in municipalities
-        ]
+        rows = []
+        for m in municipalities:
+            try:
+                state_id = m["microrregiao"]["mesorregiao"]["UF"]["id"]
+            except (KeyError, TypeError):
+                logger.warning(
+                    "IBGE: skipping municipality %s (%s) — missing UF nesting",
+                    m.get("id"), m.get("nome"),
+                )
+                continue
+            rows.append({"id": m["id"], "name": m["nome"], "state_id": state_id})
         stmt = pg_insert(IbgeMunicipality).on_conflict_do_update(
             index_elements=["id"],
             set_={"name": pg_insert(IbgeMunicipality).excluded.name,
