@@ -68,6 +68,7 @@ class AneelIngester:
         today = date.today().isoformat()
         records: list[dict] = []
         offset = 0
+        total = None
 
         while True:
             resp = self._get_with_retry(
@@ -80,16 +81,11 @@ class AneelIngester:
             )
             result = resp.json().get("result", {})
             batch = result.get("records", [])
-            if offset == 0:
-                logger.info("ANEEL: total rows in resource=%s, first batch=%d",
-                            result.get("total"), len(batch))
-                if batch:
-                    sample = batch[0]
-                    logger.info("ANEEL: sample record keys=%s", list(sample.keys()))
-                    logger.info("ANEEL: sample DscBaseTarifaria=%r DscUnidadeTerciaria=%r DatFimVigencia=%r",
-                                sample.get("DscBaseTarifaria"),
-                                sample.get("DscUnidadeTerciaria"),
-                                sample.get("DatFimVigencia"))
+
+            if total is None:
+                total = result.get("total", 0)
+                logger.info("ANEEL: total rows in resource=%d", total)
+
             if not batch:
                 break
 
@@ -101,12 +97,11 @@ class AneelIngester:
                 and (not r.get("DatFimVigencia") or r["DatFimVigencia"] >= today)
             ]
             records.extend(active)
-            logger.debug("ANEEL: offset=%d batch=%d active=%d total_so_far=%d",
-                         offset, len(batch), len(active), len(records))
+            offset += len(batch)
+            logger.debug("ANEEL: offset=%d/%d active_so_far=%d", offset, total, len(records))
 
-            if len(batch) < _LIMIT:
+            if offset >= total:
                 break
-            offset += _LIMIT
 
         logger.info("ANEEL: fetched %d active tariff records", len(records))
         return records
