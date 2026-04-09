@@ -51,7 +51,7 @@ migrate-new: ## Create a new migration (usage: make migrate-new MSG="description
 db-status: ## Show current migration state
 	alembic current
 
-db-report: ## Print full database health and data analysis report
+db-report: ## Generate PDF report and stream to stdout (redirect to local file)
 	python scripts/db_report.py
 
 # ── Pipeline ───────────────────────────────────────────────────────────────────
