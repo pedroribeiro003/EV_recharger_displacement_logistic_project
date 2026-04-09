@@ -47,16 +47,18 @@ class GeocodeService:
         sql = text(
             """
             UPDATE stations s
-            SET municipality_id = sub.id
-            FROM LATERAL (
-                SELECT m.id
-                FROM ibge_municipalities m
-                WHERE m.geom IS NOT NULL
-                ORDER BY s.geom <-> m.geom
-                LIMIT 1
+            SET municipality_id = sub.municipality_id
+            FROM (
+                SELECT DISTINCT ON (s.id)
+                    s.id   AS station_id,
+                    m.id   AS municipality_id
+                FROM stations s
+                JOIN ibge_municipalities m ON m.geom IS NOT NULL
+                WHERE s.geom IS NOT NULL
+                  AND s.municipality_id IS NULL
+                ORDER BY s.id, s.geom <-> m.geom
             ) sub
-            WHERE s.geom IS NOT NULL
-              AND s.municipality_id IS NULL
+            WHERE s.id = sub.station_id
             """
         )
         result = self.session.execute(sql)
