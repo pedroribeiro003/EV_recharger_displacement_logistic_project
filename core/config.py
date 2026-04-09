@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Tupi
     tupi_base_url: str = "https://api.tupinambaenergia.com.br"
     tupi_origin: str = "https://tupimob.com"
-    poll_interval: int = 60
+    poll_interval: int = 300
 
     # ANP
     anp_base_url: str = "https://www.gov.br/anp/pt-br/api"

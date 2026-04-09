@@ -148,6 +148,30 @@ sudo journalctl -u ev-demand -f
 
 ---
 
+## Relatório PDF
+
+Gera um PDF com análise completa do banco (estações, conectores, frota, tarifas, cobertura municipal) e envia direto para o seu computador — nenhum arquivo fica salvo no servidor.
+
+**Já dentro do servidor (tmux ou SSH):**
+
+```bash
+# 1. Gera o PDF em /tmp (não persiste no app)
+python scripts/db_report.py /tmp/ev_relatorio.pdf
+
+# 2. Numa nova aba do terminal no seu Mac, baixa o arquivo
+scp user@seu-servidor:/tmp/ev_relatorio.pdf ~/Desktop/
+```
+
+**Fora do servidor, em uma linha só:**
+
+```bash
+ssh user@seu-servidor \
+  "cd /opt/ev-demand && source venv/bin/activate && python scripts/db_report.py" \
+  > ~/Desktop/ev_relatorio.pdf
+```
+
+---
+
 ## CLI Reference
 
 ```

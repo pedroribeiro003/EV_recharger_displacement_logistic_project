@@ -1,5 +1,6 @@
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from sqlalchemy.orm import Session
@@ -108,44 +109,68 @@ class TupiIngester:
     # Runners
     # ------------------------------------------------------------------
 
-    def run_enrich(self, delay: float = 0.3) -> None:
-        """Fetch list + detail for each station, upsert into DB."""
+    def run_enrich(self, delay: float = 0.0, workers: int = 10) -> None:
+        """Fetch list + detail for each station in parallel, upsert into DB.
+
+        Args:
+            delay:   Seconds to sleep between requests per worker (rate-limit courtesy).
+            workers: Max concurrent HTTP requests to Tupi API.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from db.models.station import Connector
+
         logger.info("Tupi enrich: fetching station list")
         stations = self.fetch_all_stations()
-        logger.info("Tupi enrich: %d stations found", len(stations))
+        logger.info("Tupi enrich: %d stations found — fetching details with %d workers",
+                    len(stations), workers)
 
-        for idx, raw in enumerate(stations, 1):
+        def _fetch(raw: dict) -> tuple[dict, dict | None]:
+            sid = str(raw.get("_id") or raw.get("id") or raw.get("stationId") or "")
+            if not sid:
+                return raw, None
+            if delay:
+                time.sleep(delay)
+            return raw, self.fetch_station_detail(sid)
+
+        # Fetch all details in parallel
+        enriched: list[tuple[dict, dict | None]] = []
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_fetch, raw): raw for raw in stations}
+            for done_idx, fut in enumerate(as_completed(futures), 1):
+                try:
+                    enriched.append(fut.result())
+                except Exception as exc:
+                    logger.warning("Tupi enrich: fetch error — %s", exc)
+                if done_idx % 100 == 0:
+                    logger.info("Tupi enrich: fetched %d / %d", done_idx, len(stations))
+
+        # Upsert into DB (single thread — session is not thread-safe)
+        for idx, (raw, detail) in enumerate(enriched, 1):
             sid = str(raw.get("_id") or raw.get("id") or raw.get("stationId") or "")
             if not sid:
                 continue
 
-            detail = self.fetch_station_detail(sid)
             station_data = self._parse_station(raw, detail)
             station = self.station_repo.upsert(station_data)
 
-            # Upsert connectors
-            if detail or raw.get("connectedPlugs") or raw.get("connectors"):
-                source = detail or raw
+            source = detail or raw
+            if source.get("connectedPlugs") or source.get("connectors") or source.get("plugs"):
                 for conn_data in self._parse_connectors(source):
-                    from sqlalchemy.dialects.postgresql import insert as pg_insert
-                    from db.models.station import Connector
-
                     conn_data["station_id"] = station.id
                     stmt = (
                         pg_insert(Connector)
                         .values(**conn_data)
                         .on_conflict_do_update(
                             index_elements=["station_id", "connector_code"],
-                            set_={k: v for k, v in conn_data.items() if k not in ("station_id", "connector_code")},
+                            set_={k: v for k, v in conn_data.items()
+                                  if k not in ("station_id", "connector_code")},
                         )
                     )
                     self.session.execute(stmt)
 
             if idx % 100 == 0:
-                logger.info("Tupi enrich: processed %d / %d", idx, len(stations))
+                logger.info("Tupi enrich: upserted %d / %d", idx, len(enriched))
                 self.session.commit()
-
-            time.sleep(delay)
 
         self.session.commit()
         logger.info("Tupi enrich: complete")
