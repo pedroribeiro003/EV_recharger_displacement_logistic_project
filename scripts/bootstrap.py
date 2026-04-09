@@ -7,7 +7,11 @@ e termina no poll contínuo do Tupi.
 Uso:
     python run_all.py
 """
+import os
 import sys
+
+# Garante que o root do projeto está no path independente de onde o script é chamado
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy import text
