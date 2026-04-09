@@ -1,0 +1,34 @@
+[Unit]
+Description=EV Demand – recharger displacement logistics platform
+Documentation=https://github.com/your-org/ev-recharger-displacement-logistic-project
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ev-demand
+Group=ev-demand
+WorkingDirectory=/opt/ev-demand
+
+# Load all variables from .env (DATABASE_URL, API keys, LOG_LEVEL, etc.)
+EnvironmentFile=/opt/ev-demand/.env
+
+# Run inside the project virtualenv
+ExecStart=/opt/ev-demand/venv/bin/python scripts/bootstrap.py
+
+# Restart automatically on crash, but not on clean exit (e.g. KeyboardInterrupt)
+Restart=on-failure
+RestartSec=10
+
+# Logging — captured by journald (journalctl -u ev-demand -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ev-demand
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
