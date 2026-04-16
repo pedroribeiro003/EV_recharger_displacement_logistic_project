@@ -33,7 +33,8 @@
       "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) for group in data: for agr in group.get\\('agregados', []\\): name = agr['nome'].lower\\(\\) if 'área' in name and \\('densidade' in name or 'territorial' in name\\): print\\(json.dumps\\({'grupo': group['nome'], 'id': agr['id'], 'nome': agr['nome']}, ensure_ascii=False\\)\\) \")",
       "Bash(python:*)",
       "Bash(python3:*)",
-      "Bash(chmod +x scripts/setup.sh scripts/deploy.sh)"
+      "Bash(chmod +x scripts/setup.sh scripts/deploy.sh)",
+      "Bash(jupyter nbconvert *)"
     ]
   }
 }

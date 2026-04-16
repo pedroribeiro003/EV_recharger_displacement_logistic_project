@@ -42,5 +42,8 @@ Thumbs.db
 *.pdf
 temp.py
 
+# Análise local
+analize/
+
 # Claude Code
 .claude

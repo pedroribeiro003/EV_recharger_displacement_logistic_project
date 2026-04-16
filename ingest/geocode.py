@@ -98,6 +98,22 @@ class GeocodeService:
 
         logger.info("Geocode: assigned %d stations via KNN centroid", total_updated)
 
+    def assign_state_uf(self) -> None:
+        """Populate state_uf from municipality → state join."""
+        logger.info("Geocode: assigning state_uf from municipalities")
+        result = self.session.execute(text(
+            """
+            UPDATE stations s
+            SET state_uf = st.uf
+            FROM ibge_municipalities m
+            JOIN ibge_states st ON st.id = m.state_id
+            WHERE s.municipality_id = m.id
+              AND s.state_uf IS NULL
+            """
+        ))
+        self.session.commit()
+        logger.info("Geocode: assigned state_uf to %d stations", result.rowcount)
+
     def calculate_poi_distances(self) -> None:
         """Compute station→POI distances via lateral join and upsert."""
         logger.info("Geocode: calculating POI distances")
@@ -132,5 +148,6 @@ class GeocodeService:
         self.update_station_geoms()
         self.assign_municipalities_via_polygon()
         self.assign_municipalities_via_centroid()
+        self.assign_state_uf()
         self.calculate_poi_distances()
         logger.info("Geocode service complete")
