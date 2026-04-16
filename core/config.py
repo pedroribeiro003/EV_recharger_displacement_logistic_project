@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     poll_interval: int = 300
 
     # ANP
-    anp_base_url: str = "https://www.gov.br/anp/pt-br/api"
+    anp_base_url: str = "https://revendedoresapi.anp.gov.br"
 
     # IPEA
     ipea_base_url: str = "http://www.ipeadata.gov.br/api/odata4"
